@@ -7,7 +7,7 @@
 #   - Triggered manually via `workflow_dispatch` with `push: true`
 #
 # Conditional expression:
-#   github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push
+#   github.ref == 'refs/heads/mk/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push
 
 name: Publish Docker image
 
@@ -18,7 +18,7 @@ on:
         description: 'Git ref (tag or commit SHA) to build'
         required: true
         type: string 
-        default: 'main'
+        default: 'mk/main'
       push:
         description: 'Push the image to container registry'
         required: false
@@ -28,16 +28,15 @@ on:
     tags:
       - 'v*'
     branches:
-      - main
+      - mk/main
     paths-ignore:
       - 'charts/**'
       - 'mobile/**'
-  schedule:
-    - cron: '30 1 * * *'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # Docker registry requires lowercase repository names, and my username isn't, so hardcode image name
+  IMAGE_NAME: matthew-kilpatrick/sure
 
 permissions:
   contents: write
@@ -104,8 +103,15 @@ jobs:
                 BASE_CONFIG+=$'\n'"type=raw,value=latest"
               else
                 BASE_CONFIG+=$'\n'"type=raw,value=stable"
+                BASE_CONFIG+=$'\n'"type=raw,value=latest"
               fi
             fi
+          elif [[ "$GITHUB_REF" == refs/heads/* ]]; then
+            # Tag with branch name (sanitized for Docker compatibility)
+            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+            # Replace / with
+            BRANCH_TAG="${BRANCH_NAME//\//-}"
+            BASE_CONFIG+=$'\n'"type=raw,value=${BRANCH_TAG}"
           fi
           {
             echo 'TAGS_SPEC<<EOF'
@@ -149,7 +155,7 @@ jobs:
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},name-canonical=true,push-by-digest=true,oci-mediatypes=true
 
       - name: Export the Docker image digest
-        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push }}
+        if: ${{ github.ref == 'refs/heads/mk/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push }}
         run: |
           mkdir -p "${RUNNER_TEMP}"/digests
           echo "${DIGEST#sha256:}" > "${RUNNER_TEMP}/digests/digest-${PLATFORM}"
@@ -158,8 +164,8 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
 
       - name: Upload the Docker image digest
-        if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: ${{ github.ref == 'refs/heads/mk/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push }}
+        uses: actions/upload-artifact@v6
         with:
           name: digest-${{ matrix.platform }}
           path: ${{ runner.temp }}/digests/*
@@ -168,7 +174,7 @@ jobs:
 
   merge:
     name: Merge multi-arch manifest & push multi-arch tag
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push }}
+    if: ${{ github.ref == 'refs/heads/mk/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'schedule' || github.event.inputs.push }}
     needs: [build]
 
     timeout-minutes: 60
